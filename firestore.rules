@@ -1,0 +1,115 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId} (matches Firebase Auth UID)
+    // Fields:
+    //   - email: string (required, format: email)
+    //   - name: string (required, min: 1, max: 100)
+    //   - role: string (required, enum: ['user', 'admin'])
+    //   - createdAt: timestamp (required)
+    //   - currentStreak: number (optional)
+    //   - longestStreak: number (optional)
+    //   - lastActiveDate: string (optional)
+    //   - activeSession: map (optional)
+    //
+    // Collection: tokenUsage
+    // Document ID: auto-generated
+    // Fields:
+    //   - userId: string (required, matches author UID)
+    //   - promptTokens: number (required, positive)
+    //   - candidatesTokens: number (required, positive)
+    //   - totalTokens: number (required, positive)
+    //   - action: string (required, min: 1, max: 200)
+    //   - createdAt: timestamp (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          request.auth.token.email == "samuelezeigwe5@gmail.com");
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['id', 'email', 'name', 'role', 'createdAt', 'activeSession', 'currentStreak', 'longestStreak', 'lastActiveDate']) &&
+             data.id is string &&
+             data.email is string && isValidEmail(data.email) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.role in ['user', 'admin'] &&
+             data.createdAt is timestamp &&
+             (!('activeSession' in data) || data.activeSession is map || data.activeSession == null) &&
+             (!('currentStreak' in data) || data.currentStreak is number) &&
+             (!('longestStreak' in data) || data.longestStreak is number) &&
+             (!('lastActiveDate' in data) || data.lastActiveDate is string);
+    }
+
+    function isValidTokenUsage(data) {
+      return hasOnlyAllowedFields(['userId', 'userName', 'userEmail', 'promptTokens', 'candidatesTokens', 'totalTokens', 'action', 'createdAt']) &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.userName is string && data.userName.size() > 0 &&
+             data.userEmail is string && isValidEmail(data.userEmail) &&
+             data.promptTokens is number && data.promptTokens >= 0 &&
+             data.candidatesTokens is number && data.candidatesTokens >= 0 &&
+             data.totalTokens is number && data.totalTokens >= 0 &&
+             data.action is string && data.action.size() > 0 && data.action.size() <= 200 &&
+             data.createdAt is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      
+      allow create: if isAuthenticated() && 
+                      isValidUser(request.resource.data) && 
+                      isOwner(userId) && 
+                      (request.resource.data.role == 'user' || request.auth.token.email == "samuelezeigwe5@gmail.com" || isAdmin());
+                      
+      allow update: if isAuthenticated() && 
+                      isValidUser(request.resource.data) && 
+                      isOwner(userId) && 
+                      (request.resource.data.role == resource.data.role || request.auth.token.email == "samuelezeigwe5@gmail.com" || isAdmin());
+    }
+
+    match /tokenUsage/{usageId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isValidTokenUsage(request.resource.data);
+      allow update, delete: if false; // Usage logs are immutable
+    }
+
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}

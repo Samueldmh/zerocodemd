@@ -1,0 +1,53 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "admin"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "currentStreak": { "type": "number" },
+        "longestStreak": { "type": "number" },
+        "lastActiveDate": { "type": "string" },
+        "activeSession": {
+          "type": "object",
+          "properties": {
+            "state": { "type": "string" },
+            "quiz": { "type": "object" },
+            "results": { "type": "array" },
+            "quizProgress": { "type": "object" },
+            "lastUpdated": { "type": "string", "format": "date-time" }
+          }
+        }
+      },
+      "required": ["email", "name", "role", "createdAt"]
+    },
+    "TokenUsage": {
+      "title": "TokenUsage",
+      "description": "Log of AI token usage",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "promptTokens": { "type": "number" },
+        "candidatesTokens": { "type": "number" },
+        "totalTokens": { "type": "number" },
+        "action": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "promptTokens", "candidatesTokens", "totalTokens", "action", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/tokenUsage/{usageId}": {
+      "schema": "TokenUsage",
+      "description": "Token usage logs"
+    }
+  }
+}
