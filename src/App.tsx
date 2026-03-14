@@ -36,6 +36,7 @@ export default function App() {
   const [generatingConfig, setGeneratingConfig] = useState<{count: number, type: 'OBJECTIVE' | 'THEORY'} | null>(null);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const clearedSessionTitleRef = useRef<string | null>(null);
+  const quotaExceededRef = useRef<boolean>(false);
 
   // Load session on mount - Removed localStorage fallback
   useEffect(() => {
@@ -94,6 +95,7 @@ export default function App() {
     }
 
     syncTimeoutRef.current = setTimeout(async () => {
+      if (quotaExceededRef.current) return;
       try {
         const userDocRef = doc(db, 'users', currentUserId);
         console.log("Syncing session to cloud...", newState);
@@ -103,6 +105,10 @@ export default function App() {
         });
       } catch (err: any) {
         console.error("Error syncing session to cloud:", err);
+        if (err?.code === 'resource-exhausted' || err?.message?.includes('quota') || err?.message?.includes('Quota')) {
+          quotaExceededRef.current = true;
+          console.warn("Firebase quota exceeded. Cloud sync disabled for this session.");
+        }
         // If quota is exceeded, the optimistic local update ensures the app still works for the user
       }
     }, 3000); // 3-second debounce to prevent quota exhaustion
@@ -155,13 +161,23 @@ export default function App() {
 
             setUser(userData);
           } else {
-            // New user profile creation is handled in Auth.tsx
-            setUser({
+            // Create user profile if it doesn't exist (e.g. after signInWithRedirect)
+            const newUser: User = {
               id: firebaseUser.uid,
               email: firebaseUser.email || '',
               name: firebaseUser.displayName || 'User',
               role: firebaseUser.email === 'samuelezeigwe5@gmail.com' ? 'admin' : 'user'
-            });
+            };
+            setUser(newUser);
+            
+            try {
+              await setDoc(userDocRef, {
+                ...newUser,
+                createdAt: serverTimestamp()
+              });
+            } catch (e) {
+              console.error("Failed to create user profile in Firestore:", e);
+            }
           }
         }, (err) => {
           handleFirestoreError(err, OperationType.GET, `users/${firebaseUser.uid}`);
@@ -223,7 +239,7 @@ export default function App() {
   };
 
   const logUsage = async (usage: any, action: string) => {
-    if (!user || !usage) return;
+    if (!user || !usage || quotaExceededRef.current) return;
     const path = 'tokenUsage';
     try {
       await addDoc(collection(db, path), {
@@ -236,7 +252,10 @@ export default function App() {
         action,
         createdAt: serverTimestamp()
       });
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.code === 'resource-exhausted' || err?.message?.includes('quota') || err?.message?.includes('Quota')) {
+        quotaExceededRef.current = true;
+      }
       handleFirestoreError(err, OperationType.CREATE, path);
     }
   };
@@ -323,9 +342,14 @@ export default function App() {
           ...newStreakState
         });
 
+        if (quotaExceededRef.current) return;
+
         try {
           await updateDoc(userDocRef, newStreakState);
-        } catch (err) {
+        } catch (err: any) {
+          if (err?.code === 'resource-exhausted' || err?.message?.includes('quota') || err?.message?.includes('Quota')) {
+            quotaExceededRef.current = true;
+          }
           console.error("Error updating streak (likely quota exceeded), but updated locally:", err);
         }
       }
@@ -358,11 +382,16 @@ export default function App() {
     // Optimistically clear the local user's active session to prevent the modal from popping up
     setUser(prev => prev ? { ...prev, activeSession: undefined } : null);
 
-    if (auth.currentUser) {
+    if (auth.currentUser && !quotaExceededRef.current) {
       const userDocRef = doc(db, 'users', auth.currentUser.uid);
       updateDoc(userDocRef, {
         activeSession: null
-      }).catch(err => console.error("Error clearing cloud session:", err));
+      }).catch((err: any) => {
+        if (err?.code === 'resource-exhausted' || err?.message?.includes('quota') || err?.message?.includes('Quota')) {
+          quotaExceededRef.current = true;
+        }
+        console.error("Error clearing cloud session:", err);
+      });
     }
   };
 

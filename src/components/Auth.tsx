@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Mail, Lock, User, ArrowRight, Stethoscope, Chrome, AlertCircle } from 'lucide-react';
 import { 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
-  signInWithPopup, 
+  signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider 
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
@@ -54,21 +55,32 @@ export const Auth: React.FC<AuthProps> = ({ onAuth }) => {
     }
   };
 
+  useEffect(() => {
+    const checkRedirect = async () => {
+      try {
+        const result = await getRedirectResult(auth);
+        if (result) {
+          // App.tsx's onAuthStateChanged will handle the user state and Firestore doc creation
+          setIsLoading(true); 
+        }
+      } catch (err: any) {
+        let message = err.message;
+        if (err.code === 'auth/unauthorized-domain') message = "This domain is not authorized. Please add it to Firebase Authorized Domains.";
+        setError(message);
+        setIsLoading(false);
+      }
+    };
+    checkRedirect();
+  }, []);
+
   const handleGoogleLogin = async () => {
     setIsLoading(true);
     setError(null);
     try {
       const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
-      const userProfile = await getOrCreateUserProfile(
-        result.user.uid, 
-        result.user.email!, 
-        result.user.displayName
-      );
-      onAuth(userProfile);
+      await signInWithRedirect(auth, provider);
     } catch (err: any) {
       setError(err.message);
-    } finally {
       setIsLoading(false);
     }
   };
